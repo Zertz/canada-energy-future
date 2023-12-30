@@ -75,14 +75,26 @@ function useDimensionData({
   return dimensionData;
 }
 
-function useChartData(dimensionData: DimensionData[] = []): {
-  label: string;
-  data: DimensionData[];
-}[] {
+function useChartData(dimensionData: DimensionData[] | undefined):
+  | {
+      label: string;
+      data: {
+        year: number;
+        value: number;
+      }[];
+    }[]
+  | undefined {
+  if (!dimensionData) {
+    return;
+  }
+
   return Object.entries(Object.groupBy(dimensionData, ([type]) => type)).map(
     ([label, data]) => ({
       label,
-      data,
+      data: (data as DimensionData[]).map(([, year, value]) => ({
+        year,
+        value,
+      })),
     }),
   );
 }
@@ -141,24 +153,24 @@ function App() {
   console.info(data);
 
   const primaryAxis = useMemo(
-    (): AxisOptions<DimensionData> => ({
-      getValue: (datum) => datum[1],
+    (): AxisOptions<{ year: number; value: number }> => ({
+      getValue: (datum) => datum.year,
     }),
     [],
   );
 
   const secondaryAxes = useMemo(
-    (): AxisOptions<DimensionData>[] => [
+    (): AxisOptions<{ year: number; value: number }>[] => [
       {
-        getValue: (datum) => datum[2],
+        getValue: (datum) => datum.value,
       },
     ],
     [],
   );
 
   return (
-    <div className="absolute inset-0 bg-gray-700 text-white">
-      <div className="p-2">
+    <div className="absolute inset-0 flex bg-gray-700 text-white">
+      <div className="flex w-full flex-col gap-2 p-2">
         <div className="flex gap-2">
           {Object.entries(dimensions).map(([label, options]) => (
             <Select
@@ -175,13 +187,17 @@ function App() {
             />
           ))}
         </div>
-        <Chart
-          options={{
-            data,
-            primaryAxis,
-            secondaryAxes,
-          }}
-        />
+        <div className="relative flex-grow">
+          {data && (
+            <Chart
+              options={{
+                data,
+                primaryAxis,
+                secondaryAxes,
+              }}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

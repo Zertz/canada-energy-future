@@ -48,7 +48,9 @@ for (const data of Object.values(dataByRegionAndScenario)) {
   await writeFile(
     `public/${data.at(0).Scenario}/${data.at(0).Region}.json`,
     JSON.stringify(
-      data.map(({ Region, Scenario, ...rest }) => Object.values(rest)),
+      data
+        .sort((a, b) => a.Year - b.Year)
+        .map(({ Region, Scenario, ...rest }) => Object.values(rest)),
     ),
   );
 }
