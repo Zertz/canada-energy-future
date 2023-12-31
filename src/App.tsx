@@ -1,104 +1,130 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AxisOptions, Chart } from "react-charts";
 import { z } from "zod";
 
-const labelSchema = z.enum(["Scenarios", "Regions"]);
+const datumSchema = z.object({
+  Region: z.string(),
+  Scenario: z.string(),
+  Variable: z.string(),
+  Year: z.coerce.number(),
+  Value: z.coerce.number(),
+});
 
-type Label = z.infer<typeof labelSchema>;
+type Datum = z.infer<typeof datumSchema>;
 
-const dimensionsSchema = z.record(labelSchema, z.array(z.string()));
-
-type Dimensions = z.infer<typeof dimensionsSchema>;
-
-const dimensionDataSchema = z.tuple([z.string(), z.number(), z.number()]);
-
-type DimensionData = z.infer<typeof dimensionDataSchema>;
-
-function useDimensions() {
-  const [dimensions, setDimensions] = useState<Dimensions>({
-    Scenarios: [],
-    Regions: [],
-  });
+function useData() {
+  const [data, setData] = useState<Datum[]>();
 
   useEffect(() => {
-    fetch("/dimensions.json", {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-      .then((response) => response.json())
-      .then((json) => setDimensions(dimensionsSchema.parse(json)))
-      .catch(console.error);
+    fetch("/data.csv")
+      .then((response) => response.text())
+      .then((csv) => {
+        const lines = csv.toString().trim().split(/\r\n/g);
+        const headers = lines.at(0)?.replace(/"/g, "").split(/,/g);
+
+        if (!headers) {
+          throw new Error("Missing headers");
+        }
+
+        const data = z.array(datumSchema).parse(
+          lines.slice(1).map((line) => {
+            return Object.fromEntries(
+              line.split(/,/g).map((cell, index) => {
+                const header = headers.at(index);
+
+                if (typeof header !== "string") {
+                  throw new Error(
+                    `Missing header at index ${index} (${headers.join(", ")})`,
+                  );
+                }
+
+                if (cell.startsWith('"') && cell.endsWith('"')) {
+                  return [header, cell.substring(1, cell.length - 1)];
+                }
+
+                return [header, cell];
+              }),
+            );
+          }),
+        );
+
+        setData(data.sort((a, b) => a.Year - b.Year));
+      })
+      .catch(alert);
   }, []);
 
-  return dimensions;
+  return data;
 }
 
-function useDimensionData({
-  Scenarios,
-  Regions,
-}: Record<Label, string | undefined>) {
-  const [dimensionData, setDimensionData] = useState<DimensionData[]>();
-
-  const dimensionDataCache = useRef<
-    Record<`${string}.${string}`, DimensionData[]>
-  >({});
-
-  useEffect(() => {
-    if (!Scenarios || !Regions) {
+function useDimensions(data: Datum[] | undefined) {
+  return useMemo(() => {
+    if (!data) {
       return;
     }
 
-    const cachedData = dimensionDataCache.current[`${Scenarios}.${Regions}`];
+    return {
+      Scenario: ["All"].concat(
+        Array.from(new Set(data.map(({ Scenario }) => Scenario))).sort(),
+      ),
+      Region: ["All"].concat(
+        Array.from(new Set(data.map(({ Region }) => Region))).sort(),
+      ),
+      Variable: ["All"].concat(
+        Array.from(new Set(data.map(({ Variable }) => Variable))).sort(),
+      ),
+    };
+  }, [data]);
+}
 
-    if (cachedData) {
-      setDimensionData(cachedData);
+type Filter = {
+  dimension: keyof Exclude<ReturnType<typeof useDimensions>, undefined>;
+  value: string;
+};
 
+function useFilteredData(data: Datum[] | undefined, filters: Filter[]) {
+  return useMemo(() => {
+    if (!data) {
       return;
     }
 
-    fetch(`/${Scenarios}/${Regions}.json`, {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
-      .then((response) => response.json())
-      .then(z.array(dimensionDataSchema).parse)
-      .then((dimensionData) => {
-        dimensionDataCache.current[`${Scenarios}.${Regions}`] = dimensionData;
+    if (filters.length === 0) {
+      return data;
+    }
 
-        setDimensionData(dimensionData);
-      })
-      .catch(console.error);
-  }, [Regions, Scenarios]);
+    return data.filter((datum) => {
+      return filters.every(({ dimension, value }) => {
+        if (value === "All") {
+          return true;
+        }
 
-  return dimensionData;
+        return datum[dimension] === value;
+      });
+    });
+  }, [data, filters]);
 }
 
-function useChartData(dimensionData: ReturnType<typeof useDimensionData>):
+function useChartData(data: Datum[] | undefined):
   | {
       label: string;
-      data: {
-        year: number;
-        value: number;
-      }[];
+      data: Datum[];
     }[]
   | undefined {
   return useMemo(() => {
-    if (!dimensionData) {
+    if (!data) {
       return;
     }
 
-    return Object.entries(Object.groupBy(dimensionData, ([type]) => type)).map(
-      ([label, data]) => ({
-        label,
-        data: (data as DimensionData[]).map(([, year, value]) => ({
-          year,
-          value,
-        })),
-      }),
-    );
-  }, [dimensionData]);
+    return Object.entries(
+      Object.groupBy(
+        data,
+        ({ Region, Scenario, Variable }) =>
+          `${Region} - ${Variable} (${Scenario})`,
+      ),
+    ).map(([Variable, groupedData]) => ({
+      label: Variable,
+      data: groupedData as Datum[],
+    }));
+  }, [data]);
 }
 
 function Select({
@@ -128,30 +154,26 @@ function Select({
   );
 }
 
-function Visualization({
-  dimensionData,
-}: {
-  dimensionData: ReturnType<typeof useDimensionData>;
-}) {
-  const data = useChartData(dimensionData);
+function Visualization({ data }: { data: Datum[] | undefined }) {
+  const chartData = useChartData(data);
 
   const primaryAxis = useMemo(
-    (): AxisOptions<{ year: number; value: number }> => ({
-      getValue: (datum) => datum.year,
+    (): AxisOptions<Datum> => ({
+      getValue: (datum) => datum.Year,
     }),
     [],
   );
 
   const secondaryAxes = useMemo(
-    (): AxisOptions<{ year: number; value: number }>[] => [
+    (): AxisOptions<Datum>[] => [
       {
-        getValue: (datum) => datum.value,
+        getValue: (datum) => datum.Value,
       },
     ],
     [],
   );
 
-  if (!data) {
+  if (!chartData) {
     return null;
   }
 
@@ -159,7 +181,7 @@ function Visualization({
     <Chart
       className="text-white"
       options={{
-        data,
+        data: chartData,
         primaryAxis,
         secondaryAxes,
       }}
@@ -168,48 +190,56 @@ function Visualization({
 }
 
 function App() {
-  const dimensions = useDimensions();
+  const data = useData();
+  const dimensions = useDimensions(data);
 
-  const [selectedDimensions, setSelectedDimensions] = useState<
-    Record<Label, string | undefined>
-  >({
-    Scenarios: undefined,
-    Regions: undefined,
-  });
+  const [filters, setFilters] = useState<Filter[]>([
+    {
+      dimension: "Scenario",
+      value: "Current Measures",
+    },
+    {
+      dimension: "Region",
+      value: "All",
+    },
+    {
+      dimension: "Variable",
+      value: "All",
+    },
+  ]);
 
-  useEffect(() => {
-    const defaultScenario = dimensions.Scenarios?.at(0);
-    const defaultRegion = dimensions.Regions?.at(0);
-
-    setSelectedDimensions({
-      Scenarios: defaultScenario,
-      Regions: defaultRegion,
-    });
-  }, [dimensions]);
-
-  const dimensionData = useDimensionData(selectedDimensions);
+  const filteredData = useFilteredData(data, filters);
 
   return (
     <div className="absolute inset-0 flex bg-gray-700 text-white">
       <div className="flex w-full flex-col gap-2 p-2">
-        <div className="flex gap-2">
-          {Object.entries(dimensions).map(([label, options]) => (
-            <Select
-              key={label}
-              label={label}
-              options={options}
-              setValue={(value) => {
-                setSelectedDimensions((selectedDimensions) => ({
-                  ...selectedDimensions,
-                  [label]: value,
-                }));
-              }}
-              value={selectedDimensions[label as Label]}
-            />
-          ))}
-        </div>
+        {dimensions && (
+          <div className="flex gap-2">
+            {Object.entries(dimensions).map(([dimension, options]) => (
+              <Select
+                key={dimension}
+                label={dimension}
+                options={options}
+                setValue={(value) => {
+                  setFilters((filters) => {
+                    return filters
+                      .filter((filter) => filter.dimension !== dimension)
+                      .concat({
+                        dimension: dimension as Filter["dimension"],
+                        value,
+                      });
+                  });
+                }}
+                value={
+                  filters.find((filter) => filter.dimension === dimension)
+                    ?.value || options[0]
+                }
+              />
+            ))}
+          </div>
+        )}
         <div className="relative flex-grow">
-          <Visualization dimensionData={dimensionData} />
+          <Visualization data={filteredData} />
         </div>
       </div>
     </div>
