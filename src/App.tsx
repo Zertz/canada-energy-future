@@ -115,9 +115,10 @@ function useChartData(data: Datum[] | undefined):
     }
 
     return Object.entries(
+      // @ts-expect-error https://github.com/microsoft/TypeScript/pull/56805
       Object.groupBy(
         data,
-        ({ Region, Scenario, Variable }) =>
+        ({ Region, Scenario, Variable }: Datum) =>
           `${Region} - ${Variable} (${Scenario})`,
       ),
     ).map(([Variable, groupedData]) => ({
