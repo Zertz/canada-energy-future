@@ -174,7 +174,7 @@ function Visualization({ data }: { data: Datum[] | undefined }) {
     [],
   );
 
-  if (!chartData) {
+  if (!chartData?.length) {
     return null;
   }
 
