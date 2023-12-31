@@ -19,7 +19,7 @@ function useData() {
     fetch("/data.csv")
       .then((response) => response.text())
       .then((csv) => {
-        const lines = csv.toString().trim().split(/\r\n/g);
+        const lines = csv.toString().trim().split(/\r?\n/g);
         const headers = lines.at(0)?.replace(/"/g, "").split(/,/g);
 
         if (!headers) {
