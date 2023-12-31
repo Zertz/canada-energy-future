@@ -75,7 +75,7 @@ function useDimensionData({
   return dimensionData;
 }
 
-function useChartData(dimensionData: DimensionData[] | undefined):
+function useChartData(dimensionData: ReturnType<typeof useDimensionData>):
   | {
       label: string;
       data: {
@@ -84,19 +84,21 @@ function useChartData(dimensionData: DimensionData[] | undefined):
       }[];
     }[]
   | undefined {
-  if (!dimensionData) {
-    return;
-  }
+  return useMemo(() => {
+    if (!dimensionData) {
+      return;
+    }
 
-  return Object.entries(Object.groupBy(dimensionData, ([type]) => type)).map(
-    ([label, data]) => ({
-      label,
-      data: (data as DimensionData[]).map(([, year, value]) => ({
-        year,
-        value,
-      })),
-    }),
-  );
+    return Object.entries(Object.groupBy(dimensionData, ([type]) => type)).map(
+      ([label, data]) => ({
+        label,
+        data: (data as DimensionData[]).map(([, year, value]) => ({
+          year,
+          value,
+        })),
+      }),
+    );
+  }, [dimensionData]);
 }
 
 function Select({
@@ -126,6 +128,45 @@ function Select({
   );
 }
 
+function Visualization({
+  dimensionData,
+}: {
+  dimensionData: ReturnType<typeof useDimensionData>;
+}) {
+  const data = useChartData(dimensionData);
+
+  const primaryAxis = useMemo(
+    (): AxisOptions<{ year: number; value: number }> => ({
+      getValue: (datum) => datum.year,
+    }),
+    [],
+  );
+
+  const secondaryAxes = useMemo(
+    (): AxisOptions<{ year: number; value: number }>[] => [
+      {
+        getValue: (datum) => datum.value,
+      },
+    ],
+    [],
+  );
+
+  if (!data) {
+    return null;
+  }
+
+  return (
+    <Chart
+      className="text-white"
+      options={{
+        data,
+        primaryAxis,
+        secondaryAxes,
+      }}
+    />
+  );
+}
+
 function App() {
   const dimensions = useDimensions();
 
@@ -148,26 +189,6 @@ function App() {
 
   const dimensionData = useDimensionData(selectedDimensions);
 
-  const data = useChartData(dimensionData);
-
-  console.info(data);
-
-  const primaryAxis = useMemo(
-    (): AxisOptions<{ year: number; value: number }> => ({
-      getValue: (datum) => datum.year,
-    }),
-    [],
-  );
-
-  const secondaryAxes = useMemo(
-    (): AxisOptions<{ year: number; value: number }>[] => [
-      {
-        getValue: (datum) => datum.value,
-      },
-    ],
-    [],
-  );
-
   return (
     <div className="absolute inset-0 flex bg-gray-700 text-white">
       <div className="flex w-full flex-col gap-2 p-2">
@@ -188,15 +209,7 @@ function App() {
           ))}
         </div>
         <div className="relative flex-grow">
-          {data && (
-            <Chart
-              options={{
-                data,
-                primaryAxis,
-                secondaryAxes,
-              }}
-            />
-          )}
+          <Visualization dimensionData={dimensionData} />
         </div>
       </div>
     </div>
