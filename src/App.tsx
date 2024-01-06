@@ -222,10 +222,13 @@ function Visualization({
   );
 }
 
-function App() {
-  const data = useData();
-  const dimensions = useDimensions(data);
-
+function Section({
+  data,
+  dimensions,
+}: {
+  data: Datum[] | undefined;
+  dimensions: ReturnType<typeof useDimensions>;
+}) {
   const [filters, setFilters] = useState<Filter[]>([
     {
       dimension: "Scenario",
@@ -248,41 +251,79 @@ function App() {
   const filteredData = useFilteredData(data, filters);
 
   return (
+    <section className="flex flex-col gap-2">
+      <form>
+        {dimensions && (
+          <fieldset className="flex flex-col gap-1">
+            <legend className="sr-only">Filters</legend>
+            <div className="flex gap-2">
+              {Object.entries(dimensions).map(([dimension, options]) => (
+                <Select
+                  key={dimension}
+                  label={dimension}
+                  options={options}
+                  setValue={(value) => {
+                    setFilters((filters) => {
+                      return filters
+                        .filter((filter) => filter.dimension !== dimension)
+                        .concat({
+                          dimension: dimension as Filter["dimension"],
+                          value,
+                        });
+                    });
+                  }}
+                  value={
+                    filters.find((filter) => filter.dimension === dimension)
+                      ?.value || options[0]
+                  }
+                />
+              ))}
+            </div>
+          </fieldset>
+        )}
+      </form>
+      <div className="relative flex-grow">
+        <Visualization data={filteredData} filters={filters} />
+      </div>
+    </section>
+  );
+}
+
+function App() {
+  const [rows, setRows] = useState(1);
+  const [columns, setColumns] = useState(1);
+
+  const data = useData();
+  const dimensions = useDimensions(data);
+
+  return (
     <div className="absolute inset-0 flex bg-gray-700 text-white">
-      <div className="flex w-full flex-col gap-2 p-2">
-        <form>
-          {dimensions && (
-            <fieldset className="flex flex-col gap-1">
-              <legend className="sr-only">Filters</legend>
-              <div className="flex gap-2">
-                {Object.entries(dimensions).map(([dimension, options]) => (
-                  <Select
-                    key={dimension}
-                    label={dimension}
-                    options={options}
-                    setValue={(value) => {
-                      setFilters((filters) => {
-                        return filters
-                          .filter((filter) => filter.dimension !== dimension)
-                          .concat({
-                            dimension: dimension as Filter["dimension"],
-                            value,
-                          });
-                      });
-                    }}
-                    value={
-                      filters.find((filter) => filter.dimension === dimension)
-                        ?.value || options[0]
-                    }
-                  />
-                ))}
-              </div>
-            </fieldset>
-          )}
-        </form>
-        <div className="relative flex-grow">
-          <Visualization data={filteredData} filters={filters} />
-        </div>
+      <div
+        className="grid w-full gap-2 p-2"
+        style={{
+          gridTemplateRows: `repeat(${rows}, 1fr)`,
+          gridTemplateColumns: `repeat(${columns}, 1fr)`,
+        }}
+      >
+        {Array(rows * columns)
+          .fill(0)
+          .map((_, i) => (
+            <Section key={i} data={data} dimensions={dimensions} />
+          ))}
+      </div>
+      <div className="fixed bottom-4 right-4 flex flex-col gap-2">
+        <button
+          className="z-50 rounded-full bg-gray-300 p-2"
+          onClick={() => setRows((rows) => rows + 1)}
+        >
+          Add row
+        </button>
+        <button
+          className="z-50 rounded-full bg-gray-300 p-2"
+          onClick={() => setColumns((columns) => columns + 1)}
+        >
+          Add column
+        </button>
       </div>
     </div>
   );
