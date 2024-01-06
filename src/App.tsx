@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AxisOptions, Chart } from "react-charts";
+import { AxisOptions, Chart, UserSerie } from "react-charts";
 import { z } from "zod";
 
 const datumSchema = z.object({
@@ -11,6 +11,12 @@ const datumSchema = z.object({
 });
 
 type Datum = z.infer<typeof datumSchema>;
+type Dimension = Exclude<keyof Datum, "Value">;
+
+type Filter = {
+  dimension: Dimension;
+  value: string;
+};
 
 function useData() {
   const [data, setData] = useState<Datum[]>();
@@ -72,14 +78,12 @@ function useDimensions(data: Datum[] | undefined) {
       Variable: ["All"].concat(
         Array.from(new Set(data.map(({ Variable }) => Variable))).sort(),
       ),
+      Year: ["All"].concat(
+        Array.from(new Set(data.map(({ Year }) => `${Year}`))).sort(),
+      ),
     };
   }, [data]);
 }
-
-type Filter = {
-  dimension: keyof Exclude<ReturnType<typeof useDimensions>, undefined>;
-  value: string;
-};
 
 function useFilteredData(data: Datum[] | undefined, filters: Filter[]) {
   return useMemo(() => {
@@ -94,38 +98,56 @@ function useFilteredData(data: Datum[] | undefined, filters: Filter[]) {
     return data.filter((datum) => {
       return filters.every(({ dimension, value }) => {
         if (value === "All") {
-          return true;
+          return dimension === "Region" && value === "All"
+            ? datum.Region !== "Canada"
+            : true;
         }
 
-        return datum[dimension] === value;
+        return `${datum[dimension]}` === value;
       });
     });
   }, [data, filters]);
 }
 
-function useChartData(data: Datum[] | undefined):
-  | {
-      label: string;
-      data: Datum[];
-    }[]
-  | undefined {
+function useChartData(
+  data: Datum[] | undefined,
+  filters: Filter[],
+): UserSerie<Datum>[] | undefined {
   return useMemo(() => {
     if (!data) {
       return;
     }
 
+    const allDimensions = filters
+      .filter((filter) => filter.dimension !== "Year" && filter.value === "All")
+      .map((filter) => filter.dimension as Exclude<Dimension, "Year">);
+
+    const allRegions = allDimensions.includes("Region");
+    const allVariables = allDimensions.includes("Variable");
+    const allScenarios = allDimensions.includes("Scenario");
+
+    const groupByFn = ({ Region, Scenario, Variable }: Datum) => {
+      return `${allRegions ? Region : ""}${
+        allRegions && allVariables ? " - " : ""
+      }${allVariables ? Variable : ""}${
+        (allRegions || allVariables) && allScenarios
+          ? ` (${Scenario})`
+          : allScenarios
+            ? Scenario
+            : ""
+      }`;
+    };
+
     return Object.entries(
       // @ts-expect-error https://github.com/microsoft/TypeScript/pull/56805
-      Object.groupBy(
-        data,
-        ({ Region, Scenario, Variable }: Datum) =>
-          `${Region} - ${Variable} (${Scenario})`,
-      ),
-    ).map(([Variable, groupedData]) => ({
-      label: Variable,
-      data: groupedData as Datum[],
-    }));
-  }, [data]);
+      Object.groupBy(data, groupByFn),
+    ).map(([label, groupedData]) => {
+      return {
+        label,
+        data: groupedData as Datum[],
+      };
+    });
+  }, [data, filters]);
 }
 
 function Select({
@@ -155,18 +177,28 @@ function Select({
   );
 }
 
-function Visualization({ data }: { data: Datum[] | undefined }) {
-  const chartData = useChartData(data);
-
-  const primaryAxis = useMemo(
-    (): AxisOptions<Datum> => ({
-      getValue: (datum) => datum.Year,
-    }),
-    [],
+function Visualization({
+  data,
+  filters,
+}: {
+  data: Datum[] | undefined;
+  filters: Filter[];
+}) {
+  const hasYearFilter = filters.some(
+    ({ dimension, value }) => dimension === "Year" && value !== "All",
   );
 
-  const secondaryAxes = useMemo(
-    (): AxisOptions<Datum>[] => [
+  const chartData = useChartData(data, filters);
+
+  const primaryAxis = useMemo<AxisOptions<Datum>>(
+    () => ({
+      getValue: (datum) => (hasYearFilter ? datum.Variable : datum.Year),
+    }),
+    [hasYearFilter],
+  );
+
+  const secondaryAxes = useMemo<AxisOptions<Datum>[]>(
+    () => [
       {
         getValue: (datum) => datum.Value,
       },
@@ -180,8 +212,8 @@ function Visualization({ data }: { data: Datum[] | undefined }) {
 
   return (
     <Chart
-      className="text-white"
       options={{
+        dark: true,
         data: chartData,
         primaryAxis,
         secondaryAxes,
@@ -207,6 +239,10 @@ function App() {
       dimension: "Variable",
       value: "All",
     },
+    {
+      dimension: "Year",
+      value: "All",
+    },
   ]);
 
   const filteredData = useFilteredData(data, filters);
@@ -214,33 +250,38 @@ function App() {
   return (
     <div className="absolute inset-0 flex bg-gray-700 text-white">
       <div className="flex w-full flex-col gap-2 p-2">
-        {dimensions && (
-          <div className="flex gap-2">
-            {Object.entries(dimensions).map(([dimension, options]) => (
-              <Select
-                key={dimension}
-                label={dimension}
-                options={options}
-                setValue={(value) => {
-                  setFilters((filters) => {
-                    return filters
-                      .filter((filter) => filter.dimension !== dimension)
-                      .concat({
-                        dimension: dimension as Filter["dimension"],
-                        value,
+        <form>
+          {dimensions && (
+            <fieldset className="flex flex-col gap-1">
+              <legend className="sr-only">Filters</legend>
+              <div className="flex gap-2">
+                {Object.entries(dimensions).map(([dimension, options]) => (
+                  <Select
+                    key={dimension}
+                    label={dimension}
+                    options={options}
+                    setValue={(value) => {
+                      setFilters((filters) => {
+                        return filters
+                          .filter((filter) => filter.dimension !== dimension)
+                          .concat({
+                            dimension: dimension as Filter["dimension"],
+                            value,
+                          });
                       });
-                  });
-                }}
-                value={
-                  filters.find((filter) => filter.dimension === dimension)
-                    ?.value || options[0]
-                }
-              />
-            ))}
-          </div>
-        )}
+                    }}
+                    value={
+                      filters.find((filter) => filter.dimension === dimension)
+                        ?.value || options[0]
+                    }
+                  />
+                ))}
+              </div>
+            </fieldset>
+          )}
+        </form>
         <div className="relative flex-grow">
-          <Visualization data={filteredData} />
+          <Visualization data={filteredData} filters={filters} />
         </div>
       </div>
     </div>
